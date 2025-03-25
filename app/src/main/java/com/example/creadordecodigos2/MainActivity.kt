@@ -48,6 +48,7 @@ import com.google.zxing.common.HybridBinarizer
 import java.util.concurrent.Executors
 import androidx.camera.core.ImageProxy
 import com.google.zxing.BinaryBitmap
+import com.google.zxing.EncodeHintType
 import com.google.zxing.PlanarYUVLuminanceSource
 import java.nio.ByteBuffer
 
@@ -118,6 +119,7 @@ fun BarcodeApp(modifier: Modifier = Modifier) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QRCodeGenerator(modifier: Modifier = Modifier) {
+    var context = LocalContext.current
     var text by remember { mutableStateOf(TextFieldValue("")) }
     var qrBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
     var selectedBarcodeType by remember { mutableStateOf(BarcodeType.QR_CODE) }
@@ -161,12 +163,15 @@ fun QRCodeGenerator(modifier: Modifier = Modifier) {
                 onDismissRequest = { expanded = false },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                BarcodeType.values().forEach { type ->
+                BarcodeType.entries.forEach { type ->
                     DropdownMenuItem(
                         text = { Text(type.displayName) },
                         onClick = {
                             selectedBarcodeType = type
                             expanded = false
+                            if (selectedBarcodeType == BarcodeType.EAN_13) {
+                                Toast.makeText(context, "Para este formato solo se admiten números y 12 dígitos", Toast.LENGTH_LONG).show()
+                            }
                         }
                     )
                 }
@@ -436,41 +441,34 @@ class QRCodeAnalyzer(private val onQrCodeScanned: (String) -> Unit) : ImageAnaly
 
 fun generateBarcode(content: String, format: BarcodeFormat): ImageBitmap? {
     return try {
-        val writer = MultiFormatWriter()
-
-        // Ajustar dimensiones según el tipo de código
-        val width = when (format) {
-            BarcodeFormat.QR_CODE, BarcodeFormat.AZTEC, BarcodeFormat.DATA_MATRIX -> 512
-            else -> 800 // Códigos de barras lineales necesitan ser más anchos que altos
+        // Configuración según el formato
+        val (width, height, hints) = when (format) {
+            BarcodeFormat.QR_CODE -> Triple(500, 500, mapOf(EncodeHintType.ERROR_CORRECTION to "H"))
+            BarcodeFormat.AZTEC -> Triple(500, 500, mapOf(EncodeHintType.ERROR_CORRECTION to 23))
+            BarcodeFormat.DATA_MATRIX -> Triple(500, 500, emptyMap())
+            BarcodeFormat.PDF_417 -> Triple(1000, 300, mapOf(EncodeHintType.ERROR_CORRECTION to 2))
+            BarcodeFormat.CODE_128 -> Triple(600, 200, emptyMap())
+            BarcodeFormat.CODE_39 -> Triple(600, 200, emptyMap())
+            BarcodeFormat.EAN_13 -> Triple(500, 250, mapOf(EncodeHintType.MARGIN to 10))
+            else -> Triple(500, 200, emptyMap())
         }
 
-        val height = when (format) {
-            BarcodeFormat.QR_CODE, BarcodeFormat.AZTEC, BarcodeFormat.DATA_MATRIX -> 512
-            else -> 200 // Códigos de barras lineales necesitan ser más anchos que altos
-        }
+        val bitMatrix: BitMatrix = MultiFormatWriter().encode(content, format, width, height, hints)
 
-        // Crear una matriz de bits con el contenido
-        val hints = mapOf(
-            com.google.zxing.EncodeHintType.MARGIN to 1,
-            com.google.zxing.EncodeHintType.ERROR_CORRECTION to com.google.zxing.qrcode.decoder.ErrorCorrectionLevel.H
-        )
-
-        val bitMatrix: BitMatrix = writer.encode(content, format, width, height, hints)
-        val bitmap = createBitmap(bitMatrix.width, bitMatrix.height)
-
-        for (x in 0 until bitMatrix.width) {
-            for (y in 0 until bitMatrix.height) {
-                bitmap.setPixel(x, y, if (bitMatrix[x, y]) 0xFF000000.toInt() else 0xFFFFFFFF.toInt())
+        val bitmap = createBitmap(width, height).apply {
+            for (x in 0 until width) {
+                for (y in 0 until height) {
+                    setPixel(x, y, if (bitMatrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+                }
             }
         }
-
         bitmap.asImageBitmap()
     } catch (e: Exception) {
-        Log.e("BarcodeMaker", "Error al generar código: ${e.message}")
-        e.printStackTrace()
+        Log.e("BarcodeGenerator", "Error al generar código: ${e.message}")
         null
     }
 }
+
 
 @Preview(showBackground = true)
 @Composable
